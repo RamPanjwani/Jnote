@@ -32,6 +32,7 @@ public class App extends JFrame {
     private Socket socket;
     private ObjectOutputStream out;
     private ObjectInputStream in;
+
     public App() {
         try {
             socket = new Socket("localhost", 12345);
@@ -43,6 +44,20 @@ public class App extends JFrame {
         prefs = Preferences.userNodeForPackage(App.class);
         connectToDatabase();
         checkSession();
+    }
+
+    private String removeExtension(String fileName) {
+        if (fileName != null && fileName.endsWith(".txt")) {
+            return fileName.substring(0, fileName.length() - 4);
+        }
+        return fileName;
+    }
+
+    private String addExtension(String fileName) {
+        if (fileName != null && !fileName.endsWith(".txt")) {
+            return fileName + ".txt";
+        }
+        return fileName;
     }
 
     private void connectToDatabase() {
@@ -60,27 +75,67 @@ public class App extends JFrame {
         if (loggedInUser != null) {
             showDashboard(loggedInUser);
         } else {
-            showLoginScreen();
+            showLoginScreen(); // Show only login screen by default
         }
     }
 
     private void showLoginScreen() {
-        setTitle("Login and Registration Form");
+        setTitle("Login");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        setSize(400, 700);
+        setSize(400, 500);
         setLocationRelativeTo(null);
         setLayout(new BorderLayout());
 
         Login loginPanel = new Login(conn, this::showDashboard);
+
+        // Add navigation label
+        JLabel registerLabel = new JLabel("Don't have an account? Register here", SwingConstants.CENTER);
+        registerLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        registerLabel.setForeground(Color.BLUE);
+        registerLabel.addMouseListener(new java.awt.event.MouseAdapter() {
+            public void mouseClicked(java.awt.event.MouseEvent evt) {
+                getContentPane().removeAll();
+                showRegisterScreen();
+                revalidate();
+                repaint();
+            }
+        });
+
+        JPanel mainPanel = new JPanel(new BorderLayout());
+        mainPanel.add(loginPanel, BorderLayout.CENTER);
+        mainPanel.add(registerLabel, BorderLayout.SOUTH);
+
+        add(mainPanel);
+        setVisible(true);
+    }
+
+    private void showRegisterScreen() {
+        setTitle("Register");
+        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        setSize(400, 500);
+        setLocationRelativeTo(null);
+        setLayout(new BorderLayout());
+
         Register registerPanel = new Register(conn, this::showDashboard);
 
-        JPanel containerPanel = new JPanel();
-        containerPanel.setLayout(new BoxLayout(containerPanel, BoxLayout.Y_AXIS));
-        containerPanel.add(loginPanel);
-        containerPanel.add(Box.createRigidArea(new Dimension(0, 20)));
-        containerPanel.add(registerPanel);
+        // Add navigation label
+        JLabel loginLabel = new JLabel("Already have an account? Login here", SwingConstants.CENTER);
+        loginLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        loginLabel.setForeground(Color.BLUE);
+        loginLabel.addMouseListener(new java.awt.event.MouseAdapter() {
+            public void mouseClicked(java.awt.event.MouseEvent evt) {
+                getContentPane().removeAll();
+                showLoginScreen();
+                revalidate();
+                repaint();
+            }
+        });
 
-        add(containerPanel, BorderLayout.CENTER);
+        JPanel mainPanel = new JPanel(new BorderLayout());
+        mainPanel.add(registerPanel, BorderLayout.CENTER);
+        mainPanel.add(loginLabel, BorderLayout.SOUTH);
+
+        add(mainPanel);
         setVisible(true);
     }
 
@@ -109,19 +164,15 @@ public class App extends JFrame {
         createFileButton = new JButton("New File");
         createFileButton.addActionListener(e -> createNewFile());
 
-        deleteFileButton = new JButton("Delete File");
-        deleteFileButton.addActionListener(e -> deleteFile());
-
         selectAllButton = new JButton("Select All");
         selectAllButton.addActionListener(e -> noteList.setSelectionInterval(0, noteListModel.size() - 1));
 
-        deleteSelectedButton = new JButton("Delete Selected");
+        deleteSelectedButton = new JButton("Delete Files"); // Changed button text
         deleteSelectedButton.addActionListener(e -> deleteSelectedFiles());
 
         fileManagementPanel.add(createFileButton);
-        fileManagementPanel.add(deleteFileButton);
         fileManagementPanel.add(selectAllButton);
-        fileManagementPanel.add(deleteSelectedButton);
+        fileManagementPanel.add(deleteSelectedButton); // No deleteFileButton anymore
 
         // Create left panel with file management and note list
         JPanel leftPanel = new JPanel(new BorderLayout());
@@ -154,11 +205,18 @@ public class App extends JFrame {
         JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, leftPanel, rightPanel);
         splitPane.setDividerLocation(200);
 
-        add(splitPane, BorderLayout.CENTER);
+        // Add header with username in the middle and logout button on the side
+        JPanel headerPanel = new JPanel(new BorderLayout());
+
+        JLabel userLabel = new JLabel("Logged in as: " + username, SwingConstants.CENTER); // Centered username label
+        headerPanel.add(userLabel, BorderLayout.CENTER);
 
         JButton logoutButton = new JButton("Logout");
         logoutButton.addActionListener(e -> logout(username));
-        add(logoutButton, BorderLayout.SOUTH);
+        headerPanel.add(logoutButton, BorderLayout.EAST); // Logout button on the right
+
+        add(headerPanel, BorderLayout.NORTH); // Add header to the top
+        add(splitPane, BorderLayout.CENTER); // Add the split pane for notes
 
         // Now that everything is initialized, sync with server
         syncWithServer(username);
@@ -167,7 +225,7 @@ public class App extends JFrame {
         repaint();
         setVisible(true);
     }
-    
+
     private void syncWithServer(String username) {
         try {
             out.writeObject(new FileOperation(OperationType.SYNC_REQUEST, username, "", null));
@@ -176,13 +234,13 @@ public class App extends JFrame {
             FileOperation response = (FileOperation) in.readObject();
             if (response.getType() == OperationType.SYNC_RESPONSE) {
                 List<FileData> serverFiles = (List<FileData>) response.getData();
-                if (serverFiles != null) { // Add null check
+                if (serverFiles != null) {
                     for (FileData fileData : serverFiles) {
                         File localFile = new File(notesFolder, fileData.getFileName());
                         Files.writeString(localFile.toPath(), fileData.getContent());
                     }
                 }
-                updateNoteList(); // Will work now because noteListModel is initialized
+                updateNoteList();
             }
         } catch (IOException | ClassNotFoundException e) {
             e.printStackTrace();
@@ -200,6 +258,7 @@ public class App extends JFrame {
             if (txtFiles != null) {
                 Arrays.stream(txtFiles)
                         .map(File::getName)
+                        .map(this::removeExtension) // Remove .txt extension for display
                         .sorted()
                         .forEach(noteListModel::addElement);
             }
@@ -209,7 +268,7 @@ public class App extends JFrame {
     private void loadNoteContent() {
         String selectedNote = noteList.getSelectedValue();
         if (selectedNote != null) {
-            File noteFile = new File(notesFolder, selectedNote);
+            File noteFile = new File(notesFolder, addExtension(selectedNote)); // Add .txt for file operations
             try {
                 String content = Files.readString(noteFile.toPath());
                 noteContentArea.setText(content);
@@ -233,12 +292,12 @@ public class App extends JFrame {
                 String content = noteContentArea.getText();
 
                 // Save locally
-                File noteFile = new File(notesFolder, selectedNote);
+                File noteFile = new File(notesFolder, addExtension(selectedNote)); // Add .txt for file operations
                 Files.writeString(noteFile.toPath(), content);
 
                 // Sync with server
                 out.writeObject(new FileOperation(OperationType.UPDATE_FILE,
-                        prefs.get(SESSION_KEY, ""), selectedNote, content));
+                        prefs.get(SESSION_KEY, ""), addExtension(selectedNote), content));
                 out.flush();
 
                 FileOperation response = (FileOperation) in.readObject();
@@ -258,22 +317,24 @@ public class App extends JFrame {
     private void createNewFile() {
         String fileName = JOptionPane.showInputDialog(this, "Enter file name:");
         if (fileName != null && !fileName.trim().isEmpty()) {
-            if (!fileName.endsWith(".txt")) {
-                fileName += ".txt";
-            }
+            // Remove .txt if user added it
+            fileName = removeExtension(fileName);
 
-            File newFile = new File(notesFolder, fileName);
+            // Add .txt for file creation
+            String fileNameWithExt = addExtension(fileName);
+
+            File newFile = new File(notesFolder, fileNameWithExt);
             try {
                 if (newFile.createNewFile()) {
                     // Sync with server
                     out.writeObject(new FileOperation(OperationType.CREATE_FILE,
-                            prefs.get(SESSION_KEY, ""), fileName, ""));
+                            prefs.get(SESSION_KEY, ""), fileNameWithExt, ""));
                     out.flush();
 
                     FileOperation response = (FileOperation) in.readObject();
                     if ("SUCCESS".equals(response.getContent())) {
                         updateNoteList();
-                        noteList.setSelectedValue(fileName, true);
+                        noteList.setSelectedValue(fileName, true); // Select without extension
                         noteContentArea.setText("");
                         enableEditing();
                     }
@@ -283,38 +344,6 @@ public class App extends JFrame {
                 }
             } catch (IOException | ClassNotFoundException e) {
                 e.printStackTrace();
-            }
-        }
-    }
-
-    private void deleteFile() {
-        String selectedNote = noteList.getSelectedValue();
-        if (selectedNote != null) {
-            int confirm = JOptionPane.showConfirmDialog(this,
-                    "Are you sure you want to delete " + selectedNote + "?",
-                    "Confirm Delete",
-                    JOptionPane.YES_NO_OPTION);
-
-            if (confirm == JOptionPane.YES_OPTION) {
-                try {
-                    // Delete locally
-                    File fileToDelete = new File(notesFolder, selectedNote);
-                    fileToDelete.delete();
-
-                    // Sync with server
-                    out.writeObject(new FileOperation(OperationType.DELETE_FILE,
-                            prefs.get(SESSION_KEY, ""), selectedNote, null));
-                    out.flush();
-
-                    FileOperation response = (FileOperation) in.readObject();
-                    if ("SUCCESS".equals(response.getContent())) {
-                        updateNoteList();
-                        noteContentArea.setText("");
-                    }
-                } catch (IOException | ClassNotFoundException e) {
-                    JOptionPane.showMessageDialog(this, "Error deleting file", "Error",
-                            JOptionPane.ERROR_MESSAGE);
-                }
             }
         }
     }
@@ -331,14 +360,19 @@ public class App extends JFrame {
                 try {
                     // Delete locally
                     for (String fileName : selectedNotes) {
-                        File fileToDelete = new File(notesFolder, fileName);
+                        File fileToDelete = new File(notesFolder, addExtension(fileName)); // Add .txt for file
+                                                                                           // operations
                         fileToDelete.delete();
                     }
 
-                    // Sync with server
+                    // Sync with server - convert to list with extensions
+                    List<String> fileNamesWithExt = selectedNotes.stream()
+                            .map(this::addExtension)
+                            .collect(java.util.stream.Collectors.toList());
+
                     FileOperation deleteOp = new FileOperation(OperationType.DELETE_MULTIPLE,
                             prefs.get(SESSION_KEY, ""), "", null);
-                    deleteOp.setFileNames(selectedNotes);
+                    deleteOp.setFileNames(fileNamesWithExt);
                     out.writeObject(deleteOp);
                     out.flush();
 
@@ -352,6 +386,7 @@ public class App extends JFrame {
             }
         }
     }
+
     private void logout(String username) {
         prefs.remove(SESSION_KEY);
         deleteFolder(notesFolder);
@@ -392,26 +427,37 @@ class Login extends JPanel {
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.insets = new Insets(5, 5, 5, 5);
 
+        // Add some padding at the top
+        gbc.gridx = 0;
+        gbc.gridy = 0;
+        gbc.gridwidth = 2;
+        add(Box.createVerticalStrut(30), gbc);
+
         JLabel loginTitle = new JLabel("Login");
-        loginTitle.setFont(new Font("Arial", Font.BOLD, 16));
+        loginTitle.setFont(new Font("Arial", Font.BOLD, 24)); // Made font bigger
 
         JLabel usernameLabel = new JLabel("Username:");
-        usernameField = new JTextField(15);
+        usernameField = new JTextField(20); // Made text fields wider
 
         JLabel passwordLabel = new JLabel("Password:");
-        passwordField = new JPasswordField(15);
+        passwordField = new JPasswordField(20);
 
         showPasswordCheckBox = new JCheckBox("Show Password");
 
         JButton loginButton = new JButton("Login");
+        loginButton.setPreferredSize(new Dimension(200, 35)); // Made button bigger
 
         gbc.gridx = 0;
-        gbc.gridy = 0;
+        gbc.gridy = 1;
         gbc.gridwidth = 2;
         gbc.anchor = GridBagConstraints.CENTER;
         add(loginTitle, gbc);
 
-        gbc.gridy = 1;
+        // Add some spacing after title
+        gbc.gridy = 2;
+        add(Box.createVerticalStrut(20), gbc);
+
+        gbc.gridy = 3;
         gbc.gridwidth = 1;
         gbc.anchor = GridBagConstraints.EAST;
         add(usernameLabel, gbc);
@@ -421,7 +467,7 @@ class Login extends JPanel {
         add(usernameField, gbc);
 
         gbc.gridx = 0;
-        gbc.gridy = 2;
+        gbc.gridy = 4;
         gbc.anchor = GridBagConstraints.EAST;
         add(passwordLabel, gbc);
 
@@ -430,12 +476,13 @@ class Login extends JPanel {
         add(passwordField, gbc);
 
         gbc.gridx = 1;
-        gbc.gridy = 3;
+        gbc.gridy = 5;
         gbc.anchor = GridBagConstraints.WEST;
         add(showPasswordCheckBox, gbc);
 
-        gbc.gridx = 1;
-        gbc.gridy = 4;
+        gbc.gridx = 0;
+        gbc.gridy = 6;
+        gbc.gridwidth = 2;
         gbc.anchor = GridBagConstraints.CENTER;
         add(loginButton, gbc);
 
@@ -487,42 +534,59 @@ class Register extends JPanel {
     private JTextField usernameField;
     private JPasswordField passwordField;
     private JPasswordField confirmPasswordField;
+    private JCheckBox showPasswordCheckBox;
 
-    private void notifyServer(String username) {
-        try (Socket socket = new Socket("localhost", 12345);
-                PrintWriter out = new PrintWriter(socket.getOutputStream(), true)) {
-            out.println(username);
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-    }
-
-public Register(Connection conn, Login.LoginSuccessCallback callback) {
+    public Register(Connection conn, Login.LoginSuccessCallback callback) {
         setLayout(new GridBagLayout());
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.insets = new Insets(5, 5, 5, 5);
 
-        JLabel registerTitle = new JLabel("Register");
-        registerTitle.setFont(new Font("Arial", Font.BOLD, 16));
-
-        JLabel usernameLabel = new JLabel("Username:");
-        usernameField = new JTextField(15);
-
-        JLabel passwordLabel = new JLabel("Password:");
-        passwordField = new JPasswordField(15);
-
-        JLabel confirmPasswordLabel = new JLabel("Confirm Password:");
-        confirmPasswordField = new JPasswordField(15);
-
-        JButton registerButton = new JButton("Register");
-
+        // Add some padding at the top
         gbc.gridx = 0;
         gbc.gridy = 0;
+        gbc.gridwidth = 2;
+        add(Box.createVerticalStrut(30), gbc);
+
+        JLabel registerTitle = new JLabel("Register");
+        registerTitle.setFont(new Font("Arial", Font.BOLD, 24));
+
+        JLabel usernameLabel = new JLabel("Username:");
+        usernameField = new JTextField(20);
+
+        JLabel passwordLabel = new JLabel("Password:");
+        passwordField = new JPasswordField(20);
+
+        JLabel confirmPasswordLabel = new JLabel("Confirm Password:");
+        confirmPasswordField = new JPasswordField(20);
+
+        // Add show password checkbox
+        showPasswordCheckBox = new JCheckBox("Show Password");
+        showPasswordCheckBox.addActionListener(e -> {
+            if (showPasswordCheckBox.isSelected()) {
+                passwordField.setEchoChar((char) 0);
+                confirmPasswordField.setEchoChar((char) 0);
+            } else {
+                passwordField.setEchoChar('\u2022');
+                confirmPasswordField.setEchoChar('\u2022');
+            }
+        });
+
+        JButton registerButton = new JButton("Register");
+        registerButton.setPreferredSize(new Dimension(200, 35));
+
+        // Layout components
+        gbc.gridx = 0;
+        gbc.gridy = 1;
         gbc.gridwidth = 2;
         gbc.anchor = GridBagConstraints.CENTER;
         add(registerTitle, gbc);
 
-        gbc.gridy = 1;
+        // Add some spacing after title
+        gbc.gridy = 2;
+        add(Box.createVerticalStrut(20), gbc);
+
+        // Username field
+        gbc.gridy = 3;
         gbc.gridwidth = 1;
         gbc.anchor = GridBagConstraints.EAST;
         add(usernameLabel, gbc);
@@ -531,8 +595,9 @@ public Register(Connection conn, Login.LoginSuccessCallback callback) {
         gbc.anchor = GridBagConstraints.WEST;
         add(usernameField, gbc);
 
+        // Password field
         gbc.gridx = 0;
-        gbc.gridy = 2;
+        gbc.gridy = 4;
         gbc.anchor = GridBagConstraints.EAST;
         add(passwordLabel, gbc);
 
@@ -540,8 +605,9 @@ public Register(Connection conn, Login.LoginSuccessCallback callback) {
         gbc.anchor = GridBagConstraints.WEST;
         add(passwordField, gbc);
 
+        // Confirm password field
         gbc.gridx = 0;
-        gbc.gridy = 3;
+        gbc.gridy = 5;
         gbc.anchor = GridBagConstraints.EAST;
         add(confirmPasswordLabel, gbc);
 
@@ -549,11 +615,20 @@ public Register(Connection conn, Login.LoginSuccessCallback callback) {
         gbc.anchor = GridBagConstraints.WEST;
         add(confirmPasswordField, gbc);
 
+        // Show password checkbox
         gbc.gridx = 1;
-        gbc.gridy = 4;
+        gbc.gridy = 6;
+        gbc.anchor = GridBagConstraints.WEST;
+        add(showPasswordCheckBox, gbc);
+
+        // Register button
+        gbc.gridx = 0;
+        gbc.gridy = 7;
+        gbc.gridwidth = 2;
         gbc.anchor = GridBagConstraints.CENTER;
         add(registerButton, gbc);
 
+        // Add action listener for register button
         registerButton.addActionListener(e -> {
             String username = usernameField.getText();
             String password = new String(passwordField.getPassword());
@@ -593,5 +668,14 @@ public Register(Connection conn, Login.LoginSuccessCallback callback) {
                 }
             }
         });
+    }
+
+    private void notifyServer(String username) {
+        try (Socket socket = new Socket("localhost", 12345);
+                PrintWriter out = new PrintWriter(socket.getOutputStream(), true)) {
+            out.println(username);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
 }
